@@ -15,7 +15,7 @@ MONGO_URI = os.getenv("MONGO_URI")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('models/gemini-1.5-flash')
 
 # CONEXIÓN OFICIAL A TU MONGODB ATLAS
 client = MongoClient(MONGO_URI, server_api=ServerApi('1'))
