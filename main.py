@@ -14,7 +14,7 @@ MONGO_URI = os.getenv("MONGO_URI")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.MutableGenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 client = MongoClient(MONGO_URI)
 db = client["pizzeria_db"]
@@ -68,7 +68,7 @@ def recomendar_levadura(
     except ValueError:
         raise HTTPException(status_code=400, detail="Formato inválido. Usar 'YYYY-MM-DD HH:MM'")
 
-    lote_id = inicio_dt.strftime("%Y-%m-%d_%H-%M")
+    lote_id = inicio_dt.strftime("%Y-%m-%dT%H:%M")
     clima = obtener_clima_rango(inicio_dt, fin_dt)
     registros = list(historico_col.find({"estado": "completado"}, {"_id": 0}).sort("_id", 1))
     
