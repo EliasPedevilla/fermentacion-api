@@ -3,6 +3,7 @@ import requests
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from pymongo import MongoClient
+from pymongo.server_api import ServerApi
 from datetime import datetime
 import google.generativeai as genai
 from typing import Optional
@@ -16,7 +17,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
-client = MongoClient(MONGO_URI)
+# CONEXIÓN OFICIAL A TU MONGODB ATLAS
+client = MongoClient(MONGO_URI, server_api=ServerApi('1'))
 db = client["pizzeria_db"]
 historico_col = db["historico_fermentacion"]
 
@@ -68,8 +70,14 @@ def recomendar_levadura(
     except ValueError:
         raise HTTPException(status_code=400, detail="Formato inválido. Usar 'YYYY-MM-DD HH:MM'")
 
+    # Formato ISO 8601 limpio para el lote id
     lote_id = inicio_dt.strftime("%Y-%m-%dT%H:%M")
     clima = obtener_clima_rango(inicio_dt, fin_dt)
+    
+    # 🔍 LOG 1: Ver qué nos devolvió Open-Meteo
+    print(f"\n================ [LOG CLIMA - {lote_id}] ================")
+    print(f"Clima obtenido: {clima}")
+    
     registros = list(historico_col.find({"estado": "completado"}, {"_id": 0}).sort("_id", 1))
     
     historial_texto = ""
@@ -79,6 +87,9 @@ def recomendar_levadura(
             historial_texto += f"Duracion:{c.get('horas_totales')}h|T_Prom:{c.get('temp_promedio')}°C->{r['gramos_usados']}g->Resultado:{r['resultado']}\n"
     else:
         historial_texto = "No hay datos históricos aún."
+
+    # 🔍 LOG 2: Ver el historial exacto que le mandamos a la IA
+    print(f"\n================ [LOG HISTORIAL ENVIADO] ================\n{historial_texto}")
 
     prompt = f"""
     Eres un maestro pizzero experto en fermentación. Calculamos en gramos de LEVADURA SECA INSTANTÁNEA por cada 1kg de harina.
@@ -100,11 +111,17 @@ def recomendar_levadura(
     Responde ÚNICAMENTE con el número de gramos de levadura seca (ej: 0.8 o 1.5). Sin texto.
     """
 
+    # 🔍 LOG 3: Ver qué responde Gemini exactamente antes de intentar convertirlo a número
     try:
         response = model.generate_content(prompt)
-        gramos_sugeridos = float(response.text.strip())
-    except Exception:
-        gramos_sugeridos = 1.0
+        texto_ia = response.text.strip()
+        print(f"\n================ [LOG RESPUESTA GEMINI] ================")
+        print(f"Texto crudo de la IA: '{texto_ia}'")
+        
+        gramos_sugeridos = float(texto_ia)
+    except Exception as e:
+        print(f"\n❌ [ERROR EN EL BLOQUE GEMINI]: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en Gemini o formato: {str(e)}")
 
     borrador = {
         "_id": lote_id,
@@ -141,3 +158,19 @@ def guardar_feedback(data: FeedbackSchema):
         }
     )
     return {"status": "success", "message": f"Lote {data.lote_id} guardado con {gramos_finales}g."}
+
+@app.get("/historial")
+def obtener_todo_el_historial():
+    try:
+        registros = list(historico_col.find({}, {"_id": 0}).sort("inicio_fermentacion", 1))
+        
+        print(f"\n================ [LOG HISTORIAL GET ALL] ================")
+        print(f"Se solicitaron todos los registros. Total encontrados: {len(registros)}")
+        
+        return {
+            "total_registros": len(registros),
+            "data": registros
+        }
+    except Exception as e:
+        print(f"\n❌ [ERROR EN GET HISTORIAL]: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al leer la base de datos: {str(e)}")
