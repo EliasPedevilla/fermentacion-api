@@ -1,6 +1,7 @@
 import os
 import requests
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
@@ -180,7 +181,7 @@ def guardar_feedback(data: FeedbackSchema):
     )
     return {"status": "success", "message": f"Lote {data.lote_id} guardado con {gramos_finales}g."}
 
-@app.get("/historial")
+@app.get("/historial")  
 def obtener_todo_el_historial():
     try:
         registros = list(historico_col.find({}, {"_id": 0}).sort("inicio_fermentacion", 1))
@@ -190,3 +191,127 @@ def obtener_todo_el_historial():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al leer la base de datos: {str(e)}")
+    
+@app.get("/grafica", response_class=HTMLResponse)    
+def mostrar_grafica():
+    # Traemos todos los registros de la base de datos igual que en /historial
+    registros = list(historico_col.find({}, {"_id": 0}).sort("inicio_fermentacion", 1))
+    
+    # Procesamos los datos para dárselos masticados a Chart.js
+    puntos_grafica = []
+    for r in registros:
+        clima = r.get("clima_info", {})
+        horas = clima.get("horas_totales", 0)
+        temp = clima.get("temp_promedio", 0)
+        gramos = r.get("gramos_sugeridos_ia", 0)
+        id_lote = r.get("_id", "Desconocido")
+        
+        # Guardamos la estructura que Chart.js necesita para un gráfico de dispersión (Scatter)
+        puntos_grafica.append({
+            "x": horas,
+            "y": gramos,
+            "temp": temp,
+            "lote": id_lote
+        })
+
+    import json
+    puntos_json = json.dumps(puntos_grafica)
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Panel de Fermentación - Gráfica IA</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <style>
+            body {{
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background-color: #121212;
+                color: #ffffff;
+                margin: 0;
+                padding: 20px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }}
+            .container {{
+                width: 90%;
+                max-width: 800px;
+                background-color: #1e1e1e;
+                padding: 20px;
+                border-radius: 12px;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            }}
+            h1 {{
+                color: #ff9800;
+                margin-bottom: 5px;
+            }}
+            p {{
+                color: #aaaaaa;
+                margin-bottom: 25px;
+            }}
+        </style>
+    </head>
+    <body>
+        <h1>📊 Curva de Aprendizaje - IA Pizzera</h1>
+        <p>Eje X: Horas totales de leudado | Eje Y: Gramos de levadura seca (por 1kg de harina)</p>
+        
+        <div class="container">
+            <canvas id="pizzaChart"></canvas>
+        </div>
+
+        <script>
+            // Inyectamos los datos reales traídos de MongoDB desde Python
+            const datosBackend = {puntos_json};
+
+            const ctx = document.getElementById('pizzaChart').getContext('2d');
+            new Chart(ctx, {{
+                type: 'scatter',
+                data: {{
+                    datasets: [{{
+                        label: 'Lotes sugeridos por Gemini',
+                        data: datosBackend,
+                        backgroundColor: '#ff9800',
+                        borderColor: '#f57c00',
+                        pointRadius: 8,
+                        pointHoverRadius: 12
+                    }}]
+                }},
+                options: {{
+                    responsive: true,
+                    scales: {{
+                        x: {{
+                            title: {{ display: true, text: 'Horas Totales de Fermentación', color: '#fff' }},
+                            grid: {{ color: '#333' }},
+                            ticks: {{ color: '#aaa' }}
+                        }},
+                        y: {{
+                            title: {{ display: true, text: 'Gramos de Levadura Seca', color: '#fff' }},
+                            grid: {{ color: '#333' }},
+                            ticks: {{ color: '#aaa' }}
+                        }}
+                    }},
+                    plugins: {{
+                        tooltip: {{
+                            callbacks: {{
+                                label: function(context) {{
+                                    const raw = context.raw;
+                                    return [
+                                        `Lote: ${{raw.lote}}`,
+                                        `⏱️ Duración: ${{raw.x}}h`,
+                                        `🍞 Levadura: ${{raw.y}}g`,
+                                        `🌡️ Temp Promedio: ${{raw.temp}}°C`
+                                    ];
+                                }}
+                            }}
+                        }}
+                    }}
+                }}
+            }});
+        </script>
+    </body>
+    </html>
+    """
+    return html_content
