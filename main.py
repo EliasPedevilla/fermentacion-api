@@ -108,7 +108,7 @@ def recomendar_levadura(
     - 4 o 5 ("Sobrefermentada"): Reduce la levadura seca para climas similares.
     - 1 o 2 ("Poca fermentación"): Sube la levadura seca para climas similares.
     
-    Responde ÚNICAMENTE con un objeto JSON que tenga la clave "gramos" y el valor numérico. Ejemplo: {"gramos": 0.8}
+    Responde ÚNICAMENTE con un objeto JSON que tenga la clave "gramos" y el valor numérico. Ejemplo: {{"gramos": 0.8}}
     """
 
     # 🔍 LOG 3: Ver qué responde Gemini exactamente antes de intentar convertirlo a número
