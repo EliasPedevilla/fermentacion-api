@@ -8,6 +8,9 @@ from pymongo.server_api import ServerApi
 from datetime import datetime
 import google.generativeai as genai
 from typing import Optional
+import numpy as np
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import PolynomialFeatures
 
 app = FastAPI()
 
@@ -324,3 +327,75 @@ def mostrar_grafica():
     </html>
     """
     return html_content
+
+@app.get("/recomendar-levadura-ml")
+def recomendar_levadura_ml(inicio: str, fin: str):
+    try:
+        # 1. Calcular las horas del lote actual solicitado
+        formato = "%Y-%m-%d %H:%M"
+        dt_inicio = datetime.strptime(inicio, formato)
+        dt_fin = datetime.strptime(fin, formato)
+        horas_consulta = int((dt_fin - dt_inicio).total_seconds() / 3600)
+        
+        # 2. Consultar el pronóstico en Open-Meteo para ese rango de horas
+        clima_futuro = obtener_clima_periodo(dt_inicio, dt_fin)
+        temp_consulta = clima_futuro["temp_promedio"]
+        
+        # 3. Traer el historial de lotes reales de la DB (Sin fallbacks silenciosos)
+        registros = list(historico_col.find({"estado": "completado"}, {"_id": 0}))
+        
+        X_list = []
+        y_list = []
+        
+        for r in registros:
+            clima = r.get("clima_info", {})
+            h = clima.get("horas_totales")
+            t = clima.get("temp_promedio")
+            gramos = r.get("gramos_usados")
+            resultado = r.get("resultado")
+            
+            # Si a un documento le falta data clave, lo salta para no romper la matriz matemática
+            if h is None or t is None or gramos is None or resultado is None:
+                continue
+                
+            # PENALIZACIÓN LÓGICA: Si falló por frío (Resultado 1), entrenamos con el ajuste real estimado
+            if resultado == 1:
+                gramos = gramos * 1.5 
+                
+            X_list.append([h, t])
+            y_list.append(gramos)
+            
+        # CONTROL DE ERROR: Si no hay mínimo 3 puntos válidos, la regresión polinómica de grado 2 no puede calcularse
+        if len(X_list) < 3:
+            raise ValueError(f"No hay suficientes datos válidos en MongoDB para entrenar el modelo. Encontrados: {len(X_list)}")
+
+        X_train = np.array(X_list)
+        y_train = np.array(y_list)
+
+        # 4. Configurar y entrenar la Regresión Polinómica (Grado 2)
+        transformer = PolynomialFeatures(degree=2, include_bias=False)
+        X_poly = transformer.fit_transform(X_train)
+        
+        modelo = LinearRegression()
+        modelo.fit(X_poly, y_train)
+        
+        # 5. Ejecutar la predicción matemática
+        X_nueva = np.array([[horas_consulta, temp_consulta]])
+        X_nueva_poly = transformer.transform(X_nueva)
+        gramos_predichos = float(modelo.predict(X_nueva_poly)[0])
+        
+        # Salvaguardas físicas lógicas (No permitimos negativos ni locuras en climas extremos)
+        gramos_finales = max(0.1, min(3.5, round(gramos_predichos, 3)))
+        
+        return {
+            "motor": "Machine Learning Nativo (Scikit-Learn)",
+            "estado_consulta": "exitoso",
+            "horas_calculadas": horas_consulta,
+            "temp_promedio_pronostico": temp_consulta,
+            "gramos_sugeridos": gramos_finales,
+            "lotes_en_memoria_entrenamiento": len(X_train)
+        }
+        
+    except Exception as e:
+        # Cualquier fallo (DB caída, error de datos, etc.) rompe y te devuelve un 500 con el detalle claro
+        raise HTTPException(status_code=500, detail=f"Error en el motor ML: {str(e)}")
