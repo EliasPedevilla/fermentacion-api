@@ -23,8 +23,8 @@ client = MongoClient(MONGO_URI, server_api=ServerApi('1'))
 db = client["pizzeria_db"]
 historico_col = db["historico_fermentacion"]
 
-LATITUD = -32.41
-LONGITUD = -63.24
+LATITUD = -32.4162156
+LONGITUD = -63.2418001
 
 class FeedbackSchema(BaseModel):
     lote_id: str
@@ -108,30 +108,39 @@ def recomendar_levadura(
 
     print(f"\n================ [LOG HISTORIAL ENVIADO] ================\n{historial_texto}")
 
+    # PROMPT RIGIDO Y MATEMÁTICO
     prompt = f"""
-    Eres un maestro pizzero experto en fermentación. Calculamos en gramos de LEVADURA SECA INSTANTÁNEA por cada 1kg de harina.
-    
-    Historial:
-    {historial_texto}
-    
-    Hoy:
+    Eres un motor de cálculo matemático para fermentación de masa de pizza (1kg de harina, LEVADURA SECA INSTANTÁNEA).
+    Tu objetivo es calcular la cantidad exacta de gramos basándote estrictamente en el historial proporcionado, actuando como una función determinista. No inventes variaciones.
+
+    HISTORIAL DE REFERENCIA DE 21 HORAS:
+    - Temp Promedio: 9.3°C -> 0.625g -> Resultado: 1 (Insuficiente)
+    - Temp Promedio: 8.9°C -> 0.625g -> Resultado: 1 (Insuficiente)
+    - Temp Promedio: 10.1°C -> 1.0g -> Resultado: 3 (PERFECTO)
+
+    DATO ACTUAL A CALCULAR:
     - Duración: {clima['horas_totales']} horas
     - Temp Promedio: {clima['temp_promedio']}°C
-    - Temp Máxima: {clima['temp_max']}°C
-    - Temp Mínima: {clima['temp_min']}°C
-    
-    Escala numérica de resultados (1 al 5):
-    - 3 ("Genial"): Punto perfecto.
-    - 4 o 5 ("Sobrefermentada"): Reduce la levadura seca para climas similares.
-    - 1 o 2 ("Poca fermentación"): Sube la levadura seca para climas similares.
-    
-    Responde ÚNICAMENTE con un objeto JSON que tenga la clave "gramos" y el valor numérico. Ejemplo: {{"gramos": 0.8}}
+
+    REGLA DE CÁLCULO LOGÍSTICO:
+    1. Si la duración es de 21 horas y la Temp Promedio está cerca de los 10°C, el punto base de éxito absoluto comprobado es 1.0g.
+    2. Si hace más frío que 10.1°C, debes ajustar ligeramente hacia ARRIBA de 1.0g (ej. 1.05g o 1.1g si baja mucho), ya que 0.625g fracasó por completo.
+    3. Si hace más calor que 10.1°C, debes ajustar proporcionalmente hacia ABAJO de 1.0g.
+    4. Para tiempos más cortos (ej. 3-4 horas), la escala sube exponencialmente hacia 1.2g - 2.4g según el frío.
+
+    Devuelve SIEMPRE el mismo resultado para los mismos datos de entrada.
+    Responde ÚNICAMENTE con este formato JSON: {{"gramos": X.XX}}
     """
 
     try:
+        # ACA PASAMOS LA TEMPERATURA A 0 PARA EVITAR VARIACIONES CREATIVAS
         response = model.generate_content(
             prompt,
-            generation_config={"response_mime_type": "application/json"}
+            generation_config={
+                "response_mime_type": "application/json",
+                "temperature": 0.0,  # <-- ESTO CLAVA LA RESPUESTA EN MODO DETERMINISTA
+                "top_p": 1.0
+            }
         )
         texto_ia = response.text.strip()
         print(f"\n================ [LOG RESPUESTA GEMINI] ================")
