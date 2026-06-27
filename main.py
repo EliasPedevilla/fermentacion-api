@@ -338,7 +338,7 @@ def recomendar_levadura_ml(inicio: str, fin: str):
         horas_consulta = int((dt_fin - dt_inicio).total_seconds() / 3600)
         
         # 2. Consultar el pronóstico en Open-Meteo para ese rango de horas
-        clima_futuro = obtener_clima_periodo(dt_inicio, dt_fin)
+        clima_futuro = obtener_clima_rango(dt_inicio, dt_fin)
         temp_consulta = clima_futuro["temp_promedio"]
         
         # 3. Traer el historial de lotes reales de la DB (Sin fallbacks silenciosos)
