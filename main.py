@@ -15,7 +15,7 @@ MONGO_URI = os.getenv("MONGO_URI")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('models/gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 # CONEXIÓN OFICIAL A TU MONGODB ATLAS
 client = MongoClient(MONGO_URI, server_api=ServerApi('1'))
@@ -108,21 +108,30 @@ def recomendar_levadura(
     - 4 o 5 ("Sobrefermentada"): Reduce la levadura seca para climas similares.
     - 1 o 2 ("Poca fermentación"): Sube la levadura seca para climas similares.
     
-    Responde ÚNICAMENTE con el número de gramos de levadura seca (ej: 0.8 o 1.5). Sin texto.
+    Responde ÚNICAMENTE con un objeto JSON que tenga la clave "gramos" y el valor numérico. Ejemplo: {"gramos": 0.8}
     """
 
     # 🔍 LOG 3: Ver qué responde Gemini exactamente antes de intentar convertirlo a número
     try:
-        response = model.generate_content(prompt)
+        # Obligamos a la IA a escupir JSON estructurado
+        response = model.generate_content(
+            prompt,
+            generation_config={"response_mime_type": "application/json"}
+        )
         texto_ia = response.text.strip()
         print(f"\n================ [LOG RESPUESTA GEMINI] ================")
         print(f"Texto crudo de la IA: '{texto_ia}'")
         
-        gramos_sugeridos = float(texto_ia)
+        # Como es un JSON estricto, podemos importar json o procesarlo de forma segura.
+        # Para no importar librerías extra, le pedimos un JSON simple en el prompt y lo limpiamos:
+        import json
+        datos_ia = json.loads(texto_ia)
+        gramos_sugeridos = float(datos_ia["gramos"])
+        
     except Exception as e:
         print(f"\n❌ [ERROR EN EL BLOQUE GEMINI]: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error en Gemini o formato: {str(e)}")
-
+    
     borrador = {
         "_id": lote_id,
         "inicio_fermentacion": inicio,
