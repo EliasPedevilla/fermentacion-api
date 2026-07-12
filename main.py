@@ -349,12 +349,12 @@ def recomendar_levadura_ml(inicio: str, fin: str):
         
         for r in registros:
             clima = r.get("clima_info", {})
-            h = clima.get("horas_totales")
             t = clima.get("temp_promedio")
             gramos = r.get("gramos_usados")
             resultado = r.get("resultado")
             
-            if h is None or t is None or gramos is None or resultado is None:
+            # Ahora solo requerimos temperatura, gramos y resultado
+            if t is None or gramos is None or resultado is None:
                 continue
             if resultado == 0:
                 continue
@@ -371,34 +371,31 @@ def recomendar_levadura_ml(inicio: str, fin: str):
             elif resultado == 5:
                 gramos = gramos * 0.50
                 
-            X_list.append([h, t])
+            # X ahora es SOLO la temperatura promedio
+            X_list.append([t])
             y_list.append(gramos)
             
-        if len(X_list) < 3:
+        if len(X_list) < 2:  # Para una línea recta sola necesitamos mínimo 2 puntos
             raise ValueError(f"No hay suficientes lotes puntuados para entrenar. Encontrados: {len(X_list)}")
-        
+
         X_train = np.array(X_list)
         y_train = np.array(y_list)
 
-        # 4. Configurar y entrenar la Regresión Lineal Pura (Grado 1)
-        # Forzamos al modelo a ser estable con pocos datos
+        # 4. Entrenar la Regresión Lineal de una sola variable (Temperatura)
         modelo = LinearRegression()
-        modelo.fit(X_train, y_train) # Entrenamos directo con [Horas, Temp] sin elevar al cuadrado
+        modelo.fit(X_train, y_train)
         
-        # 5. Ejecutar la predicción matemática para la consulta
-        X_nueva = np.array([[horas_consulta, temp_consulta]])
-        gramos_predichos = float(modelo.predict(X_nueva)[0])
-        
+        # 5. Ejecutar la predicción usando solo la temperatura pronosticada
+        gramos_predichos = float(modelo.predict(np.array([[temp_consulta]]))[0])
         gramos_finales = max(0.1, min(3.5, round(gramos_predichos, 3)))
         
-        # --- EXTRACCIÓN DE LA FÓRMULA MATEMÁTICA LINEAL Y ESTABLE ---
+        # --- EXTRACCIÓN DE LA FÓRMULA INDESTRUCTIBLE ---
         coefs = modelo.coef_
         
         formula_secreta = {
             "constante_base_b0": round(float(modelo.intercept_), 4),
-            "peso_horas_b1": round(float(coefs[0]), 4),
-            "peso_temp_b2": round(float(coefs[1]), 4),
-            "ecuacion_texto": f"Gramos = {round(modelo.intercept_, 3)} + ({round(coefs[0], 3)} * Horas) + ({round(coefs[1], 3)} * Temp)"
+            "peso_temperatura_b1": round(float(coefs[0]), 4),
+            "ecuacion_texto": f"Gramos = {round(modelo.intercept_, 3)} + ({round(coefs[0], 3)} * Temp)"
         }
         
         return {
