@@ -354,13 +354,30 @@ def recomendar_levadura_ml(inicio: str, fin: str):
             gramos = r.get("gramos_usados")
             resultado = r.get("resultado")
             
-            # Si a un documento le falta data clave, lo salta para no romper la matriz matemática
+            # Validación de datos requeridos
             if h is None or t is None or gramos is None or resultado is None:
                 continue
                 
-            # PENALIZACIÓN LÓGICA: Si falló por frío (Resultado 1), entrenamos con el ajuste real estimado
+            # Saltamos lotes que estén en 0 (todavía fermentando)
+            if resultado == 0:
+                continue
+                
+            # --- ARBITRAJE DE PRECISIÓN DE 5 NIVELES ---
             if resultado == 1:
-                gramos = gramos * 1.5 
+                # Masa inutilizable por frío/falta de leudado -> Ajuste fuerte hacia arriba (+50%)
+                gramos = gramos * 1.50
+            elif resultado == 2:
+                # Se pudo usar, pero faltó un poquito -> Ajuste fino hacia arriba (+15%)
+                gramos = gramos * 1.15
+            elif resultado == 3:
+                # El punto óptimo ideal -> Se mantiene intacto
+                pass
+            elif resultado == 4:
+                # Se pudo usar, pero se pasó un poquito -> Ajuste fino hacia abajo (-15%)
+                gramos = gramos * 0.85
+            elif resultado == 5:
+                # Masa inutilizable por sobrefermentación -> Ajuste fuerte hacia abajo (-50%)
+                gramos = gramos * 0.50
                 
             X_list.append([h, t])
             y_list.append(gramos)
