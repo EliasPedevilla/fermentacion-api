@@ -331,17 +331,17 @@ def mostrar_grafica():
 @app.get("/recomendar-levadura-ml")
 def recomendar_levadura_ml(inicio: str, fin: str):
     try:
-        # 1. Calcular las horas del lote actual solicitado
+        # 1. Calcular las horas del lote solicitado
         formato = "%Y-%m-%d %H:%M"
         dt_inicio = datetime.strptime(inicio, formato)
         dt_fin = datetime.strptime(fin, formato)
         horas_consulta = int((dt_fin - dt_inicio).total_seconds() / 3600)
         
-        # 2. Consultar el pronóstico en Open-Meteo para ese rango de horas
+        # 2. Consultar el pronóstico en Open-Meteo
         clima_futuro = obtener_clima_rango(dt_inicio, dt_fin)
         temp_consulta = clima_futuro["temp_promedio"]
         
-        # 3. Traer el historial de lotes reales de la DB (Sin fallbacks silenciosos)
+        # 3. Traer el historial de lotes reales de la DB
         registros = list(historico_col.find({"estado": "completado"}, {"_id": 0}))
         
         X_list = []
@@ -354,65 +354,70 @@ def recomendar_levadura_ml(inicio: str, fin: str):
             gramos = r.get("gramos_usados")
             resultado = r.get("resultado")
             
-            # Validación de datos requeridos
             if h is None or t is None or gramos is None or resultado is None:
                 continue
-                
-            # Saltamos lotes que estén en 0 (todavía fermentando)
             if resultado == 0:
                 continue
                 
-            # --- ARBITRAJE DE PRECISIÓN DE 5 NIVELES ---
+            # Arbitraje de precisión de 5 niveles (Alineado a tus catas reales)
             if resultado == 1:
-                # Masa inutilizable por frío/falta de leudado -> Ajuste fuerte hacia arriba (+50%)
                 gramos = gramos * 1.50
             elif resultado == 2:
-                # Se pudo usar, pero faltó un poquito -> Ajuste fino hacia arriba (+15%)
                 gramos = gramos * 1.15
             elif resultado == 3:
-                # El punto óptimo ideal -> Se mantiene intacto
                 pass
             elif resultado == 4:
-                # Se pudo usar, pero se pasó un poquito -> Ajuste fino hacia abajo (-15%)
                 gramos = gramos * 0.85
             elif resultado == 5:
-                # Masa inutilizable por sobrefermentación -> Ajuste fuerte hacia abajo (-50%)
                 gramos = gramos * 0.50
                 
             X_list.append([h, t])
             y_list.append(gramos)
             
-        # CONTROL DE ERROR: Si no hay mínimo 3 puntos válidos, la regresión polinómica de grado 2 no puede calcularse
         if len(X_list) < 3:
-            raise ValueError(f"No hay suficientes datos válidos en MongoDB para entrenar el modelo. Encontrados: {len(X_list)}")
+            raise ValueError(f"No hay suficientes lotes puntuados para entrenar. Encontrados: {len(X_list)}")
 
         X_train = np.array(X_list)
         y_train = np.array(y_list)
 
         # 4. Configurar y entrenar la Regresión Polinómica (Grado 2)
+        # Genera las columnas en este orden exacto: [H, T, H^2, H*T, T^2]
         transformer = PolynomialFeatures(degree=2, include_bias=False)
         X_poly = transformer.fit_transform(X_train)
         
         modelo = LinearRegression()
         modelo.fit(X_poly, y_train)
         
-        # 5. Ejecutar la predicción matemática
+        # 5. Ejecutar la predicción matemática para la consulta
         X_nueva = np.array([[horas_consulta, temp_consulta]])
         X_nueva_poly = transformer.transform(X_nueva)
         gramos_predichos = float(modelo.predict(X_nueva_poly)[0])
         
-        # Salvaguardas físicas lógicas (No permitimos negativos ni locuras en climas extremos)
         gramos_finales = max(0.1, min(3.5, round(gramos_predichos, 3)))
         
+        # --- EXTRACCIÓN DE LA FÓRMULA MATEMÁTICA REAL ---
+        # Separamos los coeficientes según el orden interno de PolynomialFeatures(degree=2)
+        coefs = modelo.coef_
+        
+        formula_secreta = {
+            "constante_base_b0": round(float(modelo.intercept_), 4),
+            "peso_horas_b1": round(float(coefs[0]), 4),
+            "peso_temp_b2": round(float(coefs[1]), 4),
+            "peso_horas_al_cuadrado_b3": round(float(coefs[2]), 4),
+            "peso_interaccion_horas_temp_b4": round(float(coefs[3]), 4),
+            "peso_temp_al_cuadrado_b5": round(float(coefs[4]), 4),
+            "ecuacion_texto": f"Gramos = {round(modelo.intercept_, 3)} + ({round(coefs[0], 3)} * Horas) + ({round(coefs[1], 3)} * Temp) + ({round(coefs[2], 3)} * Horas²) + ({round(coefs[3], 3)} * Horas * Temp) + ({round(coefs[4], 3)} * Temp²)"
+        }
+        
         return {
-            "motor": "Machine Learning Nativo (Scikit-Learn)",
+            "motor": "Machine Learning Nativo (Scikit-Learn) v2.1",
             "estado_consulta": "exitoso",
-            "horas_calculadas": horas_consulta,
-            "temp_promedio_pronostico": temp_consulta,
+            "lotes_usados_para_entrenar": len(X_train),
+            "input_horas": horas_consulta,
+            "input_temp_promedio": temp_consulta,
             "gramos_sugeridos": gramos_finales,
-            "lotes_en_memoria_entrenamiento": len(X_train)
+            "matematica_viva": formula_secreta
         }
         
     except Exception as e:
-        # Cualquier fallo (DB caída, error de datos, etc.) rompe y te devuelve un 500 con el detalle claro
         raise HTTPException(status_code=500, detail=f"Error en el motor ML: {str(e)}")
