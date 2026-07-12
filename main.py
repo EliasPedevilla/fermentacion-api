@@ -376,37 +376,29 @@ def recomendar_levadura_ml(inicio: str, fin: str):
             
         if len(X_list) < 3:
             raise ValueError(f"No hay suficientes lotes puntuados para entrenar. Encontrados: {len(X_list)}")
-
+        
         X_train = np.array(X_list)
         y_train = np.array(y_list)
 
-        # 4. Configurar y entrenar la Regresión Polinómica (Grado 2)
-        # Genera las columnas en este orden exacto: [H, T, H^2, H*T, T^2]
-        transformer = PolynomialFeatures(degree=2, include_bias=False)
-        X_poly = transformer.fit_transform(X_train)
-        
+        # 4. Configurar y entrenar la Regresión Lineal Pura (Grado 1)
+        # Forzamos al modelo a ser estable con pocos datos
         modelo = LinearRegression()
-        modelo.fit(X_poly, y_train)
+        modelo.fit(X_train, y_train) # Entrenamos directo con [Horas, Temp] sin elevar al cuadrado
         
         # 5. Ejecutar la predicción matemática para la consulta
         X_nueva = np.array([[horas_consulta, temp_consulta]])
-        X_nueva_poly = transformer.transform(X_nueva)
-        gramos_predichos = float(modelo.predict(X_nueva_poly)[0])
+        gramos_predichos = float(modelo.predict(X_nueva)[0])
         
         gramos_finales = max(0.1, min(3.5, round(gramos_predichos, 3)))
         
-        # --- EXTRACCIÓN DE LA FÓRMULA MATEMÁTICA REAL ---
-        # Separamos los coeficientes según el orden interno de PolynomialFeatures(degree=2)
+        # --- EXTRACCIÓN DE LA FÓRMULA MATEMÁTICA LINEAL Y ESTABLE ---
         coefs = modelo.coef_
         
         formula_secreta = {
             "constante_base_b0": round(float(modelo.intercept_), 4),
             "peso_horas_b1": round(float(coefs[0]), 4),
             "peso_temp_b2": round(float(coefs[1]), 4),
-            "peso_horas_al_cuadrado_b3": round(float(coefs[2]), 4),
-            "peso_interaccion_horas_temp_b4": round(float(coefs[3]), 4),
-            "peso_temp_al_cuadrado_b5": round(float(coefs[4]), 4),
-            "ecuacion_texto": f"Gramos = {round(modelo.intercept_, 3)} + ({round(coefs[0], 3)} * Horas) + ({round(coefs[1], 3)} * Temp) + ({round(coefs[2], 3)} * Horas²) + ({round(coefs[3], 3)} * Horas * Temp) + ({round(coefs[4], 3)} * Temp²)"
+            "ecuacion_texto": f"Gramos = {round(modelo.intercept_, 3)} + ({round(coefs[0], 3)} * Horas) + ({round(coefs[1], 3)} * Temp)"
         }
         
         return {
